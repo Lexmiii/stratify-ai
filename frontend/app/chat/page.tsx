@@ -11,11 +11,17 @@ type OrbState = "idle" | "thinking" | "listening" | "speaking";
 interface Message {
   role: "user" | "lexi";
   content: string;
+  messageType?: "casual" | "emotional" | "planning";
   subproblems?: string[];
   roadmap?: any;
+  timestamp?: string;
 }
 
 const quickActions = ["Make a plan", "Surprise me", "Find a place", "Teach me something"];
+
+function getTimestamp() {
+  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -37,21 +43,33 @@ export default function ChatPage() {
 
     setInput("");
     setShowWelcome(false);
-    setMessages(prev => [...prev, { role: "user", content: messageText }]);
+    setMessages(prev => [...prev, {
+      role: "user",
+      content: messageText,
+      timestamp: getTimestamp(),
+    }]);
     setOrbState("thinking");
 
     try {
       const data = await sendMessage(messageText, sessionId.current);
 
+      const isPlanning = data.subproblems?.length > 0;
+
       const lexiMessage: Message = {
         role: "lexi",
-        content: data.roadmap?.recommendation || data.analysis || "Here's what I found for you!",
+        content: data.direct_response || data.roadmap?.recommendation || data.analysis || "Here's what I found for you!",
         subproblems: data.subproblems,
         roadmap: data.roadmap,
+        messageType: isPlanning ? "planning" : "casual",
+        timestamp: getTimestamp(),
       };
 
       setMessages(prev => [...prev, lexiMessage]);
-      setHistory(prev => [...prev, { session_id: sessionId.current, goal: messageText, timestamp: "Just now" }]);
+      setHistory(prev => [...prev, {
+        session_id: sessionId.current,
+        goal: messageText,
+        timestamp: getTimestamp(),
+      }]);
       setOrbState("speaking");
       setTimeout(() => setOrbState("idle"), 3000);
 
@@ -59,6 +77,8 @@ export default function ChatPage() {
       setMessages(prev => [...prev, {
         role: "lexi",
         content: "Sorry, I had trouble connecting. Please try again!",
+        messageType: "casual",
+        timestamp: getTimestamp(),
       }]);
       setOrbState("idle");
     }
@@ -80,7 +100,6 @@ export default function ChatPage() {
         onNewChat={handleNewChat}
       />
 
-      {/* Main area */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
         {/* Top bar */}
@@ -92,30 +111,32 @@ export default function ChatPage() {
           background: "rgba(255,255,255,0.4)",
           backdropFilter: "blur(20px)",
           borderBottom: "1px solid rgba(255,255,255,0.6)",
+          flexShrink: 0,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#86efac" }} />
+            <motion.div
+              animate={{ scale: orbState === "thinking" ? [1, 1.3, 1] : 1 }}
+              transition={{ duration: 0.8, repeat: orbState === "thinking" ? Infinity : 0 }}
+              style={{ width: 8, height: 8, borderRadius: "50%", background: "#86efac" }}
+            />
             <span style={{ fontSize: 13, color: "#9d8ec4" }}>
-              {orbState === "thinking" ? "Lexi is thinking..." : orbState === "speaking" ? "Lexi is responding..." : "Lexi is ready"}
+              {orbState === "thinking" ? "Lexi is thinking..." :
+               orbState === "speaking" ? "Lexi is responding..." : "Lexi is ready"}
             </span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{
-              padding: "4px 12px",
-              borderRadius: 20,
-              background: "linear-gradient(135deg, rgba(232,121,249,0.15), rgba(129,140,248,0.15))",
-              border: "1px solid rgba(232,121,249,0.3)",
-              fontSize: 12,
-              color: "#7c3aed",
-              fontWeight: 500,
-            }}>{currentMode}</span>
-          </div>
+          <span style={{
+            padding: "4px 14px",
+            borderRadius: 20,
+            background: "linear-gradient(135deg, rgba(232,121,249,0.15), rgba(129,140,248,0.15))",
+            border: "1px solid rgba(232,121,249,0.3)",
+            fontSize: 12,
+            color: "#7c3aed",
+            fontWeight: 500,
+          }}>{currentMode}</span>
         </div>
 
         {/* Chat area */}
         <div style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
-
-          {/* Welcome screen */}
           <AnimatePresence>
             {showWelcome && (
               <motion.div
@@ -146,8 +167,6 @@ export default function ChatPage() {
                 >
                   Your personal AI. Ask me anything.
                 </motion.p>
-
-                {/* Quick action chips */}
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -180,31 +199,54 @@ export default function ChatPage() {
             )}
           </AnimatePresence>
 
-          {/* Messages */}
           {!showWelcome && (
             <div style={{ maxWidth: 750, margin: "0 auto" }}>
               {messages.map((msg, i) => (
                 <ChatMessage key={i} message={msg} />
               ))}
 
-              {/* Thinking indicator */}
               {orbState === "thinking" && (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}
                 >
-                  <div style={{ width: 28, height: 28, borderRadius: "50%", background: "linear-gradient(135deg, #e879f9, #818cf8)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "white", fontWeight: 600 }}>L</div>
-                  <div style={{ background: "rgba(255,255,255,0.75)", borderRadius: 16, padding: "12px 16px", display: "flex", gap: 6, alignItems: "center" }}>
+                  <div style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: "50%",
+                    background: "linear-gradient(135deg, #e879f9, #818cf8)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 12,
+                    color: "white",
+                    fontWeight: 700,
+                  }}>L</div>
+                  <div style={{
+                    background: "rgba(255,255,255,0.75)",
+                    borderRadius: 16,
+                    padding: "12px 16px",
+                    display: "flex",
+                    gap: 6,
+                    alignItems: "center",
+                  }}>
                     {[0, 1, 2].map(i => (
                       <motion.div
                         key={i}
                         animate={{ scale: [1, 1.4, 1], opacity: [0.4, 1, 0.4] }}
                         transition={{ duration: 0.8, repeat: Infinity, delay: i * 0.2 }}
-                        style={{ width: 8, height: 8, borderRadius: "50%", background: "linear-gradient(135deg, #e879f9, #818cf8)" }}
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: "50%",
+                          background: "linear-gradient(135deg, #e879f9, #818cf8)",
+                        }}
                       />
                     ))}
-                    <span style={{ fontSize: 13, color: "#9d8ec4", marginLeft: 4 }}>Lexi is thinking...</span>
+                    <span style={{ fontSize: 13, color: "#9d8ec4", marginLeft: 4 }}>
+                      Lexi is thinking...
+                    </span>
                   </div>
                 </motion.div>
               )}
@@ -219,6 +261,7 @@ export default function ChatPage() {
           background: "rgba(255,255,255,0.4)",
           backdropFilter: "blur(20px)",
           borderTop: "1px solid rgba(255,255,255,0.6)",
+          flexShrink: 0,
         }}>
           <div style={{
             maxWidth: 750,
