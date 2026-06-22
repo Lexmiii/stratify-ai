@@ -51,6 +51,15 @@ needs_web = false for:
 - writing
 - creative tasks
 - general advice
+- emotional support
+- personal opinions
+- learning concepts
+- educational explanations
+- beginner questions
+- study help
+- interview preparation
+- career advice
+- programming questions
 
 User query:
 {query}
@@ -67,9 +76,7 @@ def classify_query(message: str) -> dict:
             messages=[
                 {
                     "role": "user",
-                    "content": CLASSIFIER_PROMPT.format(
-                        query=message
-                    ),
+                    "content": CLASSIFIER_PROMPT.format(query=message),
                 }
             ],
         )
@@ -78,28 +85,41 @@ def classify_query(message: str) -> dict:
 
         match = re.search(r"\{.*\}", text, re.DOTALL)
 
+        # ❌ If model output is broken → DO NOT trigger web search
         if not match:
             return {
-                "needs_web": True,
+                "needs_web": False,
                 "confidence": 0.0,
-                "reason": "classifier failed"
+                "reason": "classifier failed -> fallback to model"
             }
 
         result = json.loads(match.group())
 
-        if result.get("confidence", 0) < 0.75:
-            result["needs_web"] = True
+        confidence = float(result.get("confidence", 0))
 
-        return result
+        # 🔵 HIGH CONFIDENCE → trust classifier
+        if confidence >= 0.85:
+            return {
+                "needs_web": bool(result.get("needs_web", False)),
+                "confidence": confidence,
+                "reason": result.get("reason", "high confidence decision")
+            }
+
+        # 🟡 LOW / MEDIUM CONFIDENCE → ALWAYS fallback to model
+        return {
+            "needs_web": False,
+            "confidence": confidence,
+            "reason": "uncertain classifier -> fallback to LLM answer"
+        }
 
     except Exception:
         return {
-            "needs_web": True,
+            "needs_web": False,
             "confidence": 0.0,
-            "reason": "classifier error"
+            "reason": "classifier error -> fallback to model"
         }
 
 
 def needs_web_search(message: str) -> bool:
     result = classify_query(message)
-    return result.get("needs_web", True)
+    return bool(result.get("needs_web", False))

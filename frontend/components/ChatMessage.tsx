@@ -69,6 +69,44 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+function SpeakerButton({
+  text,
+  isSpeaking,
+  onSpeak,
+  onStop,
+}: {
+  text: string;
+  isSpeaking: boolean;
+  onSpeak: (text: string) => void;
+  onStop: () => void;
+}) {
+  return (
+    <button
+      onClick={() => (isSpeaking ? onStop() : onSpeak(text))}
+      title={isSpeaking ? "Stop reading" : "Read aloud"}
+      style={{
+        position: "absolute",
+        top: 10,
+        right: 70,
+        width: 26,
+        height: 26,
+        borderRadius: "50%",
+        border: `1px solid ${theme.border}`,
+        background: isSpeaking ? theme.primary : "rgba(255,255,255,0.6)",
+        color: isSpeaking ? "white" : theme.muted,
+        fontSize: 12,
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        transition: "all 0.2s",
+      }}
+    >
+      {isSpeaking ? "⏸" : "🔊"}
+    </button>
+  );
+}
+
 function StepLabel({ step, index }: { step: RoadmapStep; index: number }) {
   if (step.label) return <>{step.label}</>;
   if (step.phase) return <>{step.phase}</>;
@@ -77,7 +115,14 @@ function StepLabel({ step, index }: { step: RoadmapStep; index: number }) {
   return <>Step {index + 1}</>;
 }
 
-export default function ChatMessage({ message }: { message: Message }) {
+interface ChatMessageProps {
+  message: Message;
+  isSpeaking?: boolean;
+  onSpeak?: (text: string) => void;
+  onStopSpeaking?: () => void;
+}
+
+export default function ChatMessage({ message, isSpeaking = false, onSpeak, onStopSpeaking }: ChatMessageProps) {
   const [showReasoning, setShowReasoning] = useState(false);
   const isPlanning = message.messageType === "planning" ||
     (message.roadmap?.roadmap && message.roadmap.roadmap.length > 0);
@@ -158,6 +203,14 @@ export default function ChatMessage({ message }: { message: Message }) {
         maxWidth: "90%",
       }}>
         <CopyButton text={message.content} />
+        {onSpeak && onStopSpeaking && (
+          <SpeakerButton
+            text={message.content}
+            isSpeaking={isSpeaking}
+            onSpeak={onSpeak}
+            onStop={onStopSpeaking}
+          />
+        )}
 
         {/* Main content with markdown */}
         <div style={{
@@ -196,6 +249,20 @@ export default function ChatMessage({ message }: { message: Message }) {
                   fontStyle: "italic",
                 }}>{children}</blockquote>
               ),
+              a: ({ children, ...props }) => (
+          <a
+             {...props}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              color: theme.primary,
+              textDecoration: "underline",
+      fontWeight: 500,
+    }}
+  >
+    {children}
+  </a>
+          ),
             }}
           >
             {message.content}
