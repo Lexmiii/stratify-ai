@@ -8,6 +8,8 @@ import LexiOrb from "@/components/LexiOrb";
 import { useVoice } from "@/hooks/useVoice";
 import { sendMessage, generateSessionId } from "@/lib/api";
 
+export const dynamic = 'force-dynamic';
+
 const modeColors: Record<string, string> = {
   "Planner": "#7c3aed",
   "Tutor": "#0ea5e9",
