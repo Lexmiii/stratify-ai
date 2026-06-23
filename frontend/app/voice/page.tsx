@@ -1,4 +1,5 @@
 "use client";
+import { Suspense } from "react";
 import { useEffect, useCallback, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -44,7 +45,7 @@ function useIsMobile(breakpoint = 768) {
   return isMobile;
 }
 
-export default function VoicePage() {
+function VoicePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
@@ -144,7 +145,6 @@ export default function VoicePage() {
     ? "rgba(129,140,248,0.45)"
     : "rgba(232,121,249,0.18)";
 
-  // Orb scale: desktop stays 2.4 (unchanged), mobile shrinks to fit
   const orbScale = isMobile ? 1.3 : 2.4;
   const glowSize = isMobile ? 380 : 700;
 
@@ -164,7 +164,6 @@ export default function VoicePage() {
       maxWidth: "100vw",
     }}>
 
-      {/* Ambient glow */}
       <motion.div
         animate={{ opacity: [0.4, 0.75, 0.4], scale: [1, 1.12, 1] }}
         transition={{ duration: voiceMode === "speaking" ? 1.0 : 4, repeat: Infinity }}
@@ -190,7 +189,6 @@ export default function VoicePage() {
       }}>
         <span style={{ fontSize: isMobile ? 17 : 20, fontWeight: 700, color: "#2d1b69" }}>Lexi</span>
         <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 10 }}>
-
           <div style={{
             padding: isMobile ? "4px 10px" : "5px 12px", borderRadius: 20,
             fontSize: isMobile ? 11 : 12, fontWeight: 600,
@@ -201,7 +199,6 @@ export default function VoicePage() {
           }}>
             {mode}
           </div>
-
           {!isMobile && (
             <div style={{
               padding: "6px 12px", borderRadius: 20,
@@ -214,7 +211,6 @@ export default function VoicePage() {
               Voice
             </div>
           )}
-
           <motion.button
             whileTap={{ scale: 0.93 }}
             onClick={() => setShowSettings(!showSettings)}
@@ -437,5 +433,13 @@ export default function VoicePage() {
         </motion.p>
       </div>
     </div>
+  );
+}
+
+export default function VoicePageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <VoicePage />
+    </Suspense>
   );
 }
