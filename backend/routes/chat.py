@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Request
+
+from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List, Optional
 from workflows.strategy_flow import build_strategy_graph
-from main import limiter
 from services.memory_service import (
     save_session, get_session, save_message_history,
     get_message_history, get_all_chat_meta, toggle_pin, delete_chat
@@ -18,7 +18,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str = "default"
     history: Optional[List[ChatMessage]] = []
-    mode: Optional[str] = "Planner"
+    mode: Optional[str] = "Planner"  # NEW: personality mode
 
 def normalize_response(result: dict) -> dict:
     direct_response = (
@@ -41,21 +41,20 @@ def normalize_response(result: dict) -> dict:
     }
 
 @router.post("/chat")
-@limiter.limit("20/minute")
-async def chat(request: Request, chat_request: ChatRequest):
+async def chat(request: ChatRequest):
     try:
         history_text = ""
-        if chat_request.history:
+        if request.history:
             history_text = "\n".join([
                 f"{'User' if msg.role == 'user' else 'Lexi'}: {msg.content}"
-                for msg in chat_request.history[-4:]
+                for msg in request.history[-4:]
             ])
 
         graph = build_strategy_graph()
         initial_state = {
-            "goal": chat_request.message,
+            "goal": request.message,
             "history_context": history_text,
-            "mode": chat_request.mode or "Planner",
+            "mode": request.mode or "Planner",  # NEW: pass mode to graph
             "message_type": "",
             "subproblems": [],
             "timeframe": "",
@@ -75,27 +74,27 @@ async def chat(request: Request, chat_request: ChatRequest):
         normalized = normalize_response(result)
 
         await save_session(
-            chat_request.session_id,
-            chat_request.message,
+            request.session_id,
+            request.message,
             normalized["roadmap"]
         )
 
         await save_message_history(
-            chat_request.session_id,
-            chat_request.message,
+            request.session_id,
+            request.message,
             normalized["direct_response"]
         )
 
         return {
-            "session_id": chat_request.session_id,
-            "goal": chat_request.message,
+            "session_id": request.session_id,
+            "goal": request.message,
             **normalized
         }
 
     except Exception as e:
         return {
-            "session_id": chat_request.session_id,
-            "goal": chat_request.message,
+            "session_id": request.session_id,
+            "goal": request.message,
             "direct_response": "Something went wrong. Please try again!",
             "subproblems": [],
             "roadmap": {},
