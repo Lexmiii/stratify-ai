@@ -1,7 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from typing import List, Optional
 from workflows.strategy_flow import build_strategy_graph
+from main import limiter
 from services.memory_service import (
     save_session, get_session, save_message_history,
     get_message_history, get_all_chat_meta, toggle_pin, delete_chat
@@ -17,7 +18,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str = "default"
     history: Optional[List[ChatMessage]] = []
-    mode: Optional[str] = "Planner"  # NEW: personality mode
+    mode: Optional[str] = "Planner"
 
 def normalize_response(result: dict) -> dict:
     direct_response = (
@@ -40,20 +41,21 @@ def normalize_response(result: dict) -> dict:
     }
 
 @router.post("/chat")
-async def chat(request: ChatRequest):
+@limiter.limit("20/minute")
+async def chat(request: Request, chat_request: ChatRequest):
     try:
         history_text = ""
-        if request.history:
+        if chat_request.history:
             history_text = "\n".join([
                 f"{'User' if msg.role == 'user' else 'Lexi'}: {msg.content}"
-                for msg in request.history[-4:]
+                for msg in chat_request.history[-4:]
             ])
 
         graph = build_strategy_graph()
         initial_state = {
-            "goal": request.message,
+            "goal": chat_request.message,
             "history_context": history_text,
-            "mode": request.mode or "Planner",  # NEW: pass mode to graph
+            "mode": chat_request.mode or "Planner",
             "message_type": "",
             "subproblems": [],
             "timeframe": "",
@@ -73,27 +75,27 @@ async def chat(request: ChatRequest):
         normalized = normalize_response(result)
 
         await save_session(
-            request.session_id,
-            request.message,
+            chat_request.session_id,
+            chat_request.message,
             normalized["roadmap"]
         )
 
         await save_message_history(
-            request.session_id,
-            request.message,
+            chat_request.session_id,
+            chat_request.message,
             normalized["direct_response"]
         )
 
         return {
-            "session_id": request.session_id,
-            "goal": request.message,
+            "session_id": chat_request.session_id,
+            "goal": chat_request.message,
             **normalized
         }
 
     except Exception as e:
         return {
-            "session_id": request.session_id,
-            "goal": request.message,
+            "session_id": chat_request.session_id,
+            "goal": chat_request.message,
             "direct_response": "Something went wrong. Please try again!",
             "subproblems": [],
             "roadmap": {},
