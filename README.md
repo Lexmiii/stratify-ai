@@ -389,7 +389,7 @@ Limited support exists for:
 
 **Lekshmi Prasad**
 
-Final-year Computer Science student building AI-powered products and intelligent assistant systems.
+Third-year Computer Science student building AI-powered products and intelligent assistant systems.
 
 ### Links
 
