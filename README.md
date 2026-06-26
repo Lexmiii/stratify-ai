@@ -1,8 +1,6 @@
 # 🚀 Lexi — Personal AI Assistant
 
-<p align="center">
-  <img src="docs/images/lexi-banner.png" alt="Lexi Banner" width="100%">
-</p>
+
 
 <p align="center">
   <strong>A voice-enabled AI assistant with personality modes, persistent memory, web search, and mobile-first design.</strong>
@@ -10,9 +8,7 @@
 
 <p align="center">
   <a href="https://stratify-ai-tan.vercel.app">🌐 Live Demo</a> •
-  <a href="#features">✨ Features</a> •
-  <a href="#architecture">🏗️ Architecture</a> •
-  <a href="#installation">⚙️ Installation</a>
+ 
 </p>
 
 ---
