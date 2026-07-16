@@ -25,14 +25,14 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
   const conversationActiveRef = useRef(false);
   const voiceModeRef = useRef<VoiceMode>("idle");
   const isSpeakingRef = useRef(false);
-  const isThinkingRef = useRef(false); // NEW: track thinking state
+  const isThinkingRef = useRef(false);
   const selectedVoiceRef = useRef(VOICE_OPTIONS[0]);
   const gotResultRef = useRef(false);
 
   useEffect(() => {
     voiceModeRef.current = voiceMode;
     isSpeakingRef.current = voiceMode === "speaking";
-    isThinkingRef.current = voiceMode === "thinking"; // NEW
+    isThinkingRef.current = voiceMode === "thinking";
   }, [voiceMode]);
 
   useEffect(() => {
@@ -91,9 +91,8 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
 
   const startMainListening = useCallback(() => {
     if (!isSupported) return;
-    // Don't start listening if speaking OR thinking
     if (isSpeakingRef.current) return;
-    if (isThinkingRef.current) return; // NEW: don't restart during thinking
+    if (isThinkingRef.current) return;
 
     if (recognitionRef.current) {
       try { recognitionRef.current.abort(); } catch {}
@@ -120,7 +119,6 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
         const transcript = last[0].transcript.trim();
         if (transcript) {
           gotResultRef.current = true;
-          // Set thinking — this prevents restart loop via isThinkingRef
           setVoiceMode("thinking");
           isThinkingRef.current = true;
           onTranscript(transcript);
@@ -131,7 +129,6 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
     recognition.onerror = (e: any) => {
       if (e.error === "aborted") return;
       if (e.error === "no-speech") {
-        // Only restart on no-speech if not thinking and not speaking
         if (conversationActiveRef.current && !isSpeakingRef.current && !isThinkingRef.current) {
           setTimeout(() => startMainListening(), 300);
         }
@@ -150,13 +147,11 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
     };
 
     recognition.onend = () => {
-      // Only restart if conversation active, no result yet,
-      // not speaking, not thinking, still in listening mode
       if (
         conversationActiveRef.current &&
         !gotResultRef.current &&
         !isSpeakingRef.current &&
-        !isThinkingRef.current && // NEW: don't restart during thinking
+        !isThinkingRef.current &&
         voiceModeRef.current === "listening"
       ) {
         setTimeout(() => startMainListening(), 300);
@@ -190,14 +185,13 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
   const speak = useCallback((text: string, onEnd?: () => void) => {
     if (!synthRef.current) return;
 
-    // Stop recognition before speaking
     if (recognitionRef.current) {
       try { recognitionRef.current.abort(); } catch {}
       recognitionRef.current = null;
     }
 
     synthRef.current.cancel();
-    isThinkingRef.current = false; // Clear thinking when speak starts
+    isThinkingRef.current = false;
 
     const cleanText = text
       .replace(/\*\*/g, "").replace(/\*/g, "")
@@ -225,6 +219,21 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
     utterance.volume = 1;
     utterance.lang = currentVoice.lang;
 
+    // safety timeout — if speech doesn't end within 60s, recover automatically
+    const safetyTimer = setTimeout(() => {
+      if (isSpeakingRef.current) {
+        console.warn("Speech safety timeout triggered — recovering");
+        isSpeakingRef.current = false;
+        isThinkingRef.current = false;
+        if (conversationActiveRef.current) {
+          setVoiceMode("listening");
+          setTimeout(() => startMainListening(), 400);
+        } else {
+          setVoiceMode("idle");
+        }
+      }
+    }, 60000);
+
     utterance.onstart = () => {
       setVoiceMode("speaking");
       isSpeakingRef.current = true;
@@ -232,6 +241,7 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
     };
 
     utterance.onend = () => {
+      clearTimeout(safetyTimer);
       isSpeakingRef.current = false;
       isThinkingRef.current = false;
       onSpeakEnd();
@@ -245,6 +255,7 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
     };
 
     utterance.onerror = (e) => {
+      clearTimeout(safetyTimer);
       if (e.error === "interrupted") return;
       console.error("Speech error:", e.error);
       isSpeakingRef.current = false;
@@ -258,6 +269,14 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
     };
 
     synthRef.current.speak(utterance);
+
+    // Chrome bug fix — speech synthesis sometimes pauses silently
+    setTimeout(() => {
+      if (synthRef.current && synthRef.current.paused) {
+        synthRef.current.resume();
+      }
+    }, 1000);
+
   }, [getBestVoice, onSpeakEnd, startMainListening]);
 
   const stopListening = useCallback(() => {

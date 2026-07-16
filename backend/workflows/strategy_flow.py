@@ -1,5 +1,6 @@
 import json
 import re
+import os
 from typing import TypedDict, List, Optional
 from langgraph.graph import StateGraph, END
 
@@ -15,6 +16,7 @@ from prompts.planner_prompt import (
     ROUTER_PROMPT,
     EMOTIONAL_PROMPT,
     CASUAL_PROMPT,
+    DEFAULT_PROMPT,
     TUTOR_PROMPT,
     FRIEND_PROMPT,
     INTERVIEW_COACH_PROMPT,
@@ -34,7 +36,7 @@ def reset_temporary_fields(state: "AgentState") -> "AgentState":
 class AgentState(TypedDict):
     goal: str
     history_context: str
-    mode: str  # NEW
+    mode: str
     message_type: str
     subproblems: List[str]
     timeframe: str
@@ -48,11 +50,13 @@ class AgentState(TypedDict):
     verification_required: bool
     verified: bool
     show_sources: bool
+    is_action: bool
+    db: object
 
 def call_groq(prompt: str, temperature: float = 0.7) -> str:
     client = get_groq_client()
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         messages=[{"role": "user", "content": prompt}],
         temperature=temperature,
     )
@@ -80,25 +84,20 @@ def lexi_already_asked_question(history: str) -> bool:
     return False
 
 def get_mode_prompt(state: "AgentState", base_prompt: str) -> str:
-    """
-    For non-planning message types, override the prompt based on active mode.
-    Planner mode uses existing CASUAL/EMOTIONAL flow.
-    Tutor/Friend/Interview Coach get their own prompt entirely.
-    """
-    mode = state.get("mode", "Planner")
+    mode = state.get("mode", "Default")
     goal = state["goal"]
     history = state.get("history_context", "")
     research = state.get("research_notes", "")
 
-    # These modes completely replace the casual/emotional prompt
     if mode == "Tutor":
         prompt = TUTOR_PROMPT.format(goal=goal)
     elif mode == "Friend":
         prompt = FRIEND_PROMPT.format(goal=goal)
     elif mode == "Interview coach":
         prompt = INTERVIEW_COACH_PROMPT.format(goal=goal)
+    elif mode == "Default":
+        prompt = DEFAULT_PROMPT.format(goal=goal)
     else:
-        # Planner mode — use the base prompt as-is
         prompt = base_prompt
 
     if history:
@@ -108,12 +107,33 @@ def get_mode_prompt(state: "AgentState", base_prompt: str) -> str:
 
     return prompt
 
-def router_node(state: AgentState) -> AgentState:
-    mode = state.get("mode", "Planner")
+WEB_SEARCH_TRIGGERS = [
+    "look it up", "search the web", "search online", "google it",
+    "find on the web", "look on the web", "search for",
+    "find their", "find the", "what is their email",
+    "contact email", "organizer email", "support email",
+    "look up", "can you find", "find out",
+]
 
-    # Interview Coach always routes to CASUAL so it hits the right node
-    # but the node will use the coach prompt based on mode
+def needs_forced_search(message: str) -> bool:
+    message_lower = message.lower()
+    return any(trigger in message_lower for trigger in WEB_SEARCH_TRIGGERS)
+
+def router_node(state: AgentState) -> AgentState:
+    state["is_action"] = False
+    mode = state.get("mode", "Default")
+
     if mode == "Interview coach":
+        state["message_type"] = "CASUAL"
+        state = reset_temporary_fields(state)
+        return state
+
+    if needs_forced_search(state["goal"]):
+        state["message_type"] = "CASUAL"
+        state = reset_temporary_fields(state)
+        return state
+
+    if mode == "Default":
         state["message_type"] = "CASUAL"
         state = reset_temporary_fields(state)
         return state
@@ -132,6 +152,9 @@ def router_node(state: AgentState) -> AgentState:
     return state
 
 def search_node(state: AgentState) -> AgentState:
+    if state.get("is_action"):
+        return state
+
     state = reset_temporary_fields(state)
 
     simple_messages = [
@@ -153,7 +176,7 @@ def search_node(state: AgentState) -> AgentState:
         state["search_failed"] = False
         return state
 
-    if state["message_type"] == "EMOTIONAL":
+    if state["message_type"] == "EMOTIONAL" and not needs_forced_search(state["goal"]):
         state["research_notes"] = ""
         state["sources"] = []
         state["used_search"] = False
@@ -179,6 +202,7 @@ def search_node(state: AgentState) -> AgentState:
         needs_web_search(goal)
         or is_live_fact_query(goal)
         or state.get("show_sources", False)
+        or needs_forced_search(goal)
     )
 
     state["verification_required"] = should_search
@@ -217,9 +241,8 @@ def search_node(state: AgentState) -> AgentState:
 
 def emotional_node(state: AgentState) -> AgentState:
     history = state.get("history_context", "")
-    mode = state.get("mode", "Planner")
+    mode = state.get("mode", "Default")
 
-    # Friend mode handles emotional topics differently
     if mode == "Friend":
         prompt = get_mode_prompt(state, FRIEND_PROMPT.format(goal=state["goal"]))
     else:
@@ -245,6 +268,10 @@ def clean_style(text: str) -> str:
         "Certainly!", "Absolutely!", "Of course!", "Sure!",
         "Great question!", "I'd be happy to", "I'm happy to",
         "As an AI", "As a language model",
+        "oh no that genuinely sucks",
+        "I totally understand",
+        "that must be frustrating",
+        "I feel you",
     ]
     for filler in fillers:
         text = text.replace(filler, "")
@@ -279,21 +306,21 @@ def casual_node(state: AgentState) -> AgentState:
         return state
 
     history = state.get("history_context", "")
-    mode = state.get("mode", "Planner")
+    mode = state.get("mode", "Default")
 
-    # Build the base prompt depending on mode
     if mode == "Tutor":
         base_prompt = TUTOR_PROMPT.format(goal=state["goal"])
     elif mode == "Friend":
         base_prompt = FRIEND_PROMPT.format(goal=state["goal"])
     elif mode == "Interview coach":
         base_prompt = INTERVIEW_COACH_PROMPT.format(goal=state["goal"])
+    elif mode == "Default":
+        base_prompt = DEFAULT_PROMPT.format(goal=state["goal"])
     else:
         base_prompt = CASUAL_PROMPT.format(goal=state["goal"])
 
     prompt = base_prompt
 
-    # Short follow-up handling (only for default Planner/Casual mode)
     if mode == "Planner":
         short_followups = [
             "yes", "yeah", "yep", "sure", "ok", "okay",
@@ -426,7 +453,7 @@ def build_strategy_graph():
         "emotional": "emotional",
         "casual": "casual",
         "planning": "planning",
-        "blocked": "blocked"
+        "blocked": "blocked",
     })
     workflow.add_edge("emotional", END)
     workflow.add_edge("casual", END)

@@ -1,6 +1,7 @@
 "use client";
 import { motion } from "framer-motion";
 import { ListTodo, GraduationCap, MessageCircle, Target, Plus, Star, Trash2, X } from "lucide-react";
+import GoogleConnect from "./GoogleConnect";
 
 interface ChatMeta {
   session_id: string;
@@ -18,7 +19,7 @@ interface SidebarProps {
   onSelectChat: (sessionId: string) => void;
   onPinChat: (sessionId: string) => void;
   onDeleteChat: (sessionId: string) => void;
-  onClose?: () => void; // mobile only — closes the drawer
+  onClose?: () => void;
   isMobile?: boolean;
 }
 
@@ -44,7 +45,7 @@ export default function Sidebar({
         background: "rgba(255,255,255,0.65)",
         backdropFilter: "blur(20px)",
         borderRight: "1px solid rgba(255,255,255,0.8)",
-        padding: "20px 12px",
+        padding: "20px 12px 12px",
         display: "flex",
         flexDirection: "column",
         gap: 4,
@@ -217,6 +218,16 @@ export default function Sidebar({
           );
         })}
       </div>
+
+      {/* Profile / Google Connect — Claude style */}
+      <div style={{
+        marginTop: "auto",
+        paddingTop: 8,
+        borderTop: "1px solid rgba(232,121,249,0.12)",
+      }}>
+        <GoogleConnect />
+      </div>
+
     </motion.div>
   );
 }
