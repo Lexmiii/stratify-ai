@@ -9,12 +9,8 @@ app = FastAPI(title="Stratify AI")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://stratify-ai-tan.vercel.app",
-        "https://stratify-ai-git-main-24cs213-8082s-projects.vercel.app",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
