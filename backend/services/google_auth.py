@@ -47,6 +47,8 @@ def _decrypt(token_str: str) -> dict:
 def get_auth_url(session_id: str) -> str:
     flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES)
     flow.redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
+    # disable PKCE to avoid code verifier issues
+    flow.oauth2session.code_challenge_method = None
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
@@ -59,7 +61,8 @@ def get_auth_url(session_id: str) -> str:
 async def handle_callback(code: str, session_id: str, db) -> dict:
     flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES, state=session_id)
     flow.redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
-    flow.fetch_token(code=code)
+    # disable PKCE code verifier
+    flow.fetch_token(code=code, code_verifier=None)
 
     creds = flow.credentials
     token_data = {
