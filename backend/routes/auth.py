@@ -1,4 +1,5 @@
 import os
+import traceback
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, JSONResponse
 from services.google_auth import (
@@ -23,12 +24,19 @@ async def google_login(session_id: str):
 
 @router.get("/google/callback")
 async def google_callback(request: Request, code: str, state: str):
-    db = get_db(request)
-    result = await handle_callback(code=code, session_id=state, db=db)
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-    return RedirectResponse(
-        url=f"{frontend_url}?google_connected=true&email={result['email']}"
-    )
+    try:
+        db = get_db(request)
+        result = await handle_callback(code=code, session_id=state, db=db)
+        return RedirectResponse(
+            url=f"{frontend_url}?google_connected=true&email={result['email']}"
+        )
+    except Exception as e:
+        traceback.print_exc()
+        print(f"CALLBACK ERROR: {str(e)}")
+        return RedirectResponse(
+            url=f"{frontend_url}?error=auth_failed&reason={str(e)}"
+        )
 
 
 @router.get("/google/status")
