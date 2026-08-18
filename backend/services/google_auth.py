@@ -1,10 +1,10 @@
 import os
 import json
+import requests
 from datetime import datetime, timezone
 from cryptography.fernet import Fernet
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 SCOPES = [
@@ -18,15 +18,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/userinfo.profile",
 ]
 
-CLIENT_CONFIG = {
-    "web": {
-        "client_id": os.getenv("GOOGLE_CLIENT_ID"),
-        "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
-        "redirect_uris": [os.getenv("GOOGLE_REDIRECT_URI")],
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-    }
-}
+AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
+TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 
 def _get_fernet():
@@ -45,37 +38,64 @@ def _decrypt(token_str: str) -> dict:
 
 
 def get_auth_url(session_id: str) -> str:
-    flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES)
-    flow.redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
-    # disable PKCE to avoid code verifier issues
-    flow.oauth2session.code_challenge_method = None
-    auth_url, _ = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent",
-        state=session_id,
-    )
-    return auth_url
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
+    scope = " ".join(SCOPES)
+
+    params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": scope,
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": session_id,
+        "include_granted_scopes": "true",
+    }
+
+    from urllib.parse import urlencode
+    return f"{AUTH_URI}?{urlencode(params)}"
 
 
 async def handle_callback(code: str, session_id: str, db) -> dict:
-    flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES, state=session_id)
-    flow.redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
-    # disable PKCE code verifier
-    flow.fetch_token(code=code, code_verifier=None)
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
 
-    creds = flow.credentials
-    token_data = {
-        "token": creds.token,
-        "refresh_token": creds.refresh_token,
-        "token_uri": creds.token_uri,
-        "client_id": creds.client_id,
-        "client_secret": creds.client_secret,
-        "scopes": list(creds.scopes) if creds.scopes else SCOPES,
-        "expiry": creds.expiry.isoformat() if creds.expiry else None,
+    # exchange code for token directly without PKCE
+    token_response = requests.post(TOKEN_URI, data={
+        "code": code,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code",
+    })
+
+    if not token_response.ok:
+        raise Exception(f"Token exchange failed: {token_response.text}")
+
+    token_data = token_response.json()
+
+    creds = Credentials(
+        token=token_data.get("access_token"),
+        refresh_token=token_data.get("refresh_token"),
+        token_uri=TOKEN_URI,
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=SCOPES,
+    )
+
+    encrypted_data = {
+        "token": token_data.get("access_token"),
+        "refresh_token": token_data.get("refresh_token"),
+        "token_uri": TOKEN_URI,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scopes": SCOPES,
+        "expiry": None,
     }
 
-    encrypted = _encrypt(token_data)
+    encrypted = _encrypt(encrypted_data)
 
     service = build("oauth2", "v2", credentials=creds)
     user_info = service.userinfo().get().execute()
