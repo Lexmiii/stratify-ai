@@ -29,13 +29,13 @@ async def google_callback(request: Request, code: str, state: str):
         db = get_db(request)
         result = await handle_callback(code=code, session_id=state, db=db)
         return RedirectResponse(
-            url=f"{frontend_url}?google_connected=true&email={result['email']}"
+            url=f"{frontend_url}/chat?google_connected=true&email={result['email']}"
         )
     except Exception as e:
         traceback.print_exc()
         print(f"CALLBACK ERROR: {str(e)}")
         return RedirectResponse(
-            url=f"{frontend_url}?error=auth_failed&reason={str(e)}"
+            url=f"{frontend_url}/chat?error=auth_failed&reason={str(e)}"
         )
 
 
