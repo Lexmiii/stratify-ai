@@ -14,6 +14,8 @@ export const VOICE_OPTIONS = [
   { id: "guy", name: "Guy", description: "Deep & confident", lang: "en-US", gender: "male", pitch: 0.85, rate: 0.92, greeting: "Hey! I'm Guy, deep and confident. What can I do for you?" },
 ];
 
+const API = process.env.NEXT_PUBLIC_API_URL;
+
 export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
   const [voiceMode, setVoiceMode] = useState<VoiceMode>("idle");
   const [selectedVoice, setSelectedVoice] = useState(VOICE_OPTIONS[0]);
@@ -21,7 +23,7 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
   const [isSupported, setIsSupported] = useState(false);
 
   const recognitionRef = useRef<any>(null);
-  const synthRef = useRef<SpeechSynthesis | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const conversationActiveRef = useRef(false);
   const voiceModeRef = useRef<VoiceMode>("idle");
   const isSpeakingRef = useRef(false);
@@ -43,37 +45,13 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
     if (typeof window !== "undefined") {
       const supported = "SpeechRecognition" in window || "webkitSpeechRecognition" in window;
       setIsSupported(supported);
-      synthRef.current = window.speechSynthesis;
-      const loadVoices = () => setAvailableVoices(window.speechSynthesis.getVoices());
+      // load browser voices for fallback only
+      const loadVoices = () => setAvailableVoices(window.speechSynthesis?.getVoices() || []);
       loadVoices();
-      window.speechSynthesis.onvoiceschanged = loadVoices;
+      if (window.speechSynthesis) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+      }
     }
-  }, []);
-
-  const getBestVoice = useCallback((voiceOption: typeof VOICE_OPTIONS[0], voices: SpeechSynthesisVoice[]) => {
-    if (!voices.length) return null;
-    const nameMap: Record<string, string[]> = {
-      aria: ["Microsoft Aria", "Aria Online", "Aria"],
-      jenny: ["Microsoft Jenny", "Jenny Online", "Jenny"],
-      guy: ["Microsoft Guy", "Guy Online", "Guy"],
-    };
-    const preferred = nameMap[voiceOption.id] || [];
-    for (const name of preferred) {
-      const found = voices.find(v => v.name.includes(name));
-      if (found) return found;
-    }
-    if (voiceOption.gender === "female") {
-      return voices.find(v => v.name.includes("Samantha")) ||
-        voices.find(v => v.name.includes("Google US English")) ||
-        voices.find(v => v.name.toLowerCase().includes("female")) ||
-        voices.find(v => v.lang === "en-US") ||
-        voices[0];
-    }
-    return voices.find(v => v.name.includes("Alex")) ||
-      voices.find(v => v.name.includes("Daniel")) ||
-      voices.find(v => v.name.toLowerCase().includes("male")) ||
-      voices.find(v => v.lang === "en-US") ||
-      voices[0];
   }, []);
 
   const stopAllRecognition = useCallback(() => {
@@ -84,7 +62,11 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
   }, []);
 
   const stopSpeaking = useCallback(() => {
-    if (synthRef.current) synthRef.current.cancel();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
     isSpeakingRef.current = false;
     setVoiceMode("idle");
   }, []);
@@ -169,28 +151,23 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
   }, [isSupported, onTranscript]);
 
   const previewVoice = useCallback((voiceOption: typeof VOICE_OPTIONS[0]) => {
-    if (!synthRef.current) return;
-    synthRef.current.cancel();
-    const voices = window.speechSynthesis.getVoices();
-    const utterance = new SpeechSynthesisUtterance(voiceOption.greeting);
-    const voice = getBestVoice(voiceOption, voices);
-    if (voice) utterance.voice = voice;
-    utterance.pitch = voiceOption.pitch;
-    utterance.rate = voiceOption.rate;
-    utterance.volume = 1;
-    utterance.lang = voiceOption.lang;
-    synthRef.current.speak(utterance);
-  }, [getBestVoice]);
+    // preview uses ElevenLabs too
+    speak(voiceOption.greeting);
+  }, []);
 
   const speak = useCallback((text: string, onEnd?: () => void) => {
-    if (!synthRef.current) return;
+    // stop any current audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
 
     if (recognitionRef.current) {
       try { recognitionRef.current.abort(); } catch {}
       recognitionRef.current = null;
     }
 
-    synthRef.current.cancel();
     isThinkingRef.current = false;
 
     const cleanText = text
@@ -209,20 +186,10 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
       return;
     }
 
-    const currentVoice = selectedVoiceRef.current;
-    const voices = window.speechSynthesis.getVoices();
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    const voice = getBestVoice(currentVoice, voices);
-    if (voice) utterance.voice = voice;
-    utterance.pitch = currentVoice.pitch;
-    utterance.rate = currentVoice.rate;
-    utterance.volume = 1;
-    utterance.lang = currentVoice.lang;
-
-    // safety timeout — if speech doesn't end within 60s, recover automatically
+    // safety timeout
     const safetyTimer = setTimeout(() => {
       if (isSpeakingRef.current) {
-        console.warn("Speech safety timeout triggered — recovering");
+        console.warn("Speech safety timeout");
         isSpeakingRef.current = false;
         isThinkingRef.current = false;
         if (conversationActiveRef.current) {
@@ -234,50 +201,79 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
       }
     }, 60000);
 
-    utterance.onstart = () => {
-      setVoiceMode("speaking");
-      isSpeakingRef.current = true;
-      isThinkingRef.current = false;
-    };
+    setVoiceMode("speaking");
+    isSpeakingRef.current = true;
 
-    utterance.onend = () => {
-      clearTimeout(safetyTimer);
-      isSpeakingRef.current = false;
-      isThinkingRef.current = false;
-      onSpeakEnd();
-      if (onEnd) onEnd();
-      if (conversationActiveRef.current) {
-        setVoiceMode("listening");
-        setTimeout(() => startMainListening(), 400);
-      } else {
-        setVoiceMode("idle");
-      }
-    };
+    // call ElevenLabs via backend
+    fetch(`${API}/api/speak`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: cleanText }),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error("TTS failed");
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audioRef.current = audio;
 
-    utterance.onerror = (e) => {
-      clearTimeout(safetyTimer);
-      if (e.error === "interrupted") return;
-      console.error("Speech error:", e.error);
-      isSpeakingRef.current = false;
-      isThinkingRef.current = false;
-      if (conversationActiveRef.current) {
-        setVoiceMode("listening");
-        setTimeout(() => startMainListening(), 400);
-      } else {
-        setVoiceMode("idle");
-      }
-    };
+        audio.onended = () => {
+          clearTimeout(safetyTimer);
+          URL.revokeObjectURL(url);
+          audioRef.current = null;
+          isSpeakingRef.current = false;
+          isThinkingRef.current = false;
+          onSpeakEnd();
+          if (onEnd) onEnd();
+          if (conversationActiveRef.current) {
+            setVoiceMode("listening");
+            setTimeout(() => startMainListening(), 400);
+          } else {
+            setVoiceMode("idle");
+          }
+        };
 
-    synthRef.current.speak(utterance);
+        audio.onerror = () => {
+          clearTimeout(safetyTimer);
+          URL.revokeObjectURL(url);
+          audioRef.current = null;
+          isSpeakingRef.current = false;
+          isThinkingRef.current = false;
+          if (conversationActiveRef.current) {
+            setVoiceMode("listening");
+            setTimeout(() => startMainListening(), 400);
+          } else {
+            setVoiceMode("idle");
+          }
+        };
 
-    // Chrome bug fix — speech synthesis sometimes pauses silently
-    setTimeout(() => {
-      if (synthRef.current && synthRef.current.paused) {
-        synthRef.current.resume();
-      }
-    }, 1000);
+        audio.play().catch((err) => {
+          console.error("Audio play error:", err);
+          clearTimeout(safetyTimer);
+          isSpeakingRef.current = false;
+          isThinkingRef.current = false;
+          if (conversationActiveRef.current) {
+            setVoiceMode("listening");
+            setTimeout(() => startMainListening(), 400);
+          } else {
+            setVoiceMode("idle");
+          }
+        });
+      })
+      .catch((err) => {
+        console.error("ElevenLabs TTS error:", err);
+        clearTimeout(safetyTimer);
+        isSpeakingRef.current = false;
+        isThinkingRef.current = false;
+        if (conversationActiveRef.current) {
+          setVoiceMode("listening");
+          setTimeout(() => startMainListening(), 400);
+        } else {
+          setVoiceMode("idle");
+        }
+      });
 
-  }, [getBestVoice, onSpeakEnd, startMainListening]);
+  }, [onSpeakEnd, startMainListening]);
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
@@ -291,7 +287,10 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
     if (voiceModeRef.current === "listening") {
       stopListening();
     } else if (voiceModeRef.current === "speaking") {
-      if (synthRef.current) synthRef.current.cancel();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
       isSpeakingRef.current = false;
       isThinkingRef.current = false;
       setVoiceMode("listening");
@@ -302,7 +301,10 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
   }, [startMainListening, stopListening]);
 
   const interrupt = useCallback(() => {
-    if (synthRef.current) synthRef.current.cancel();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
     isSpeakingRef.current = false;
     isThinkingRef.current = false;
     setVoiceMode("listening");
@@ -319,15 +321,23 @@ export function useVoice({ onTranscript, onSpeakEnd }: VoiceOptions) {
     conversationActiveRef.current = false;
     isSpeakingRef.current = false;
     isThinkingRef.current = false;
-    if (synthRef.current) synthRef.current.cancel();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
     stopAllRecognition();
     setVoiceMode("idle");
   }, [stopAllRecognition]);
+
+  const getBestVoice = useCallback((voiceOption: typeof VOICE_OPTIONS[0], voices: SpeechSynthesisVoice[]) => {
+    return voices[0] || null;
+  }, []);
 
   return {
     voiceMode, isSupported, selectedVoice, setSelectedVoice,
     voiceOptions: VOICE_OPTIONS, speak, stopSpeaking, previewVoice,
     toggleMic, interrupt, startConversation, endConversation,
     isConversationMode: conversationActiveRef.current,
+    availableVoices, getBestVoice,
   };
 }
