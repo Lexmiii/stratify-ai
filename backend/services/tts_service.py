@@ -1,8 +1,8 @@
 import os
 import httpx
 
-ELEVENLABS_API_KEY = os.getenv("sk_7018ff0f0041c248f5b2db73c4a593d584fa26e8f2a6a4c7")
-ELEVENLABS_VOICE_ID = os.getenv("56bWURjYFHyYyVf490Dp")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
 
 async def text_to_speech(text: str) -> bytes:
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
